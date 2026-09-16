@@ -43,9 +43,9 @@ def train_epoch(epoch, loader, iters, start_step = 0, wandb = None):
         scaler.scale(loss).backward() # 使用 GradScaler 放大 loss 后进行反向传播，防止半精度（FP16）下的梯度下溢出。
         # 梯度累加控制
             # 当累加到一定的步数的时候，对优化器进行一个真正的参数更新
-        if epoch % args.accumulation_steps == 0:
+        if step % args.accumulation_steps == 0:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm(model.parameters(), args.grad_chip) # 梯度裁剪放置梯度爆炸
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_chip) # 梯度裁剪放置梯度爆炸
 
             scaler.step(optimizer)
             scaler.update()
@@ -93,7 +93,7 @@ def train_epoch(epoch, loader, iters, start_step = 0, wandb = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MiniMind Pretraining")
-    parser.add_argument("--save_dir", type=str, default="../out", help="模型保存目录")
+    parser.add_argument("--save_dir", type=str, default="../train_result", help="模型保存目录")
     parser.add_argument('--save_weight', default='pretrain', type=str, help="保存权重的前缀名")
     parser.add_argument("--epochs", type=int, default=2, help="训练轮数")
     parser.add_argument("--batch_size", type=int, default=32, help="batch size")
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     for epoch in range(start_epoch, args.epochs):
         train_sampler and train_sampler.set_epoch(epoch)
         setup_seed(42 + epoch)
-        indices = torch.randerm(len(train_ds)).tolist()
+        indices = torch.randperm(len(train_ds)).tolist()
         skip = start_step if (epoch == start_epoch and start_step > 0) else 0
         batch_sampler = SkipBatchSampler(train_sampler or indices, args.batch_size, skip) # 将采样的数据合成一个个batch方便后续训练
         loader = DataLoader(train_ds, batch_sampler = batch_sampler, num_workers=args.num_workers, pin_memory = True)

@@ -134,7 +134,7 @@ def precompute_freqs_cis(dim:int, end:int = int(32 * 1024), rope_base:float = 1e
     freqs = torch.outer(t, freqs).float() # t和freqs外积
     # 基于逐元素相乘构造旋转矩阵，计算旋转角度
     freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim = -1) * attn_factor
-    freqs_sin = torch.cat([torch.cos(freqs), torch.sin(freqs)], dim = -1) * attn_factor
+    freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim = -1) * attn_factor
     return freqs_cos, freqs_sin
 
 
@@ -191,7 +191,8 @@ class Attention(nn.Module):
 
         # 5、在推理阶段，kv存在的时候可以直接用缓存复用，提升计算速度
         if past_key_value is not None:
-            xk = torch.cat([past_key_value[1], xk],dim = 1)
+            # past_key_value里面第0维度是k，第1维度是v
+            xk = torch.cat([past_key_value[0], xk],dim = 1)
             xv = torch.cat([past_key_value[1], xv], dim=1)
         past_kv = (xk, xv) if use_cache else None
 
@@ -217,6 +218,7 @@ class Attention(nn.Module):
                 scores += (1.0 - attention_mask.unsqueeze(1).unsqueeze(2)) * -1e9
             output = self.attn_dropout(F.softmax(scores.float()), dim = -1).type_as(xq) @ xv
 
+        output = output.transpose(1,2).reshape(bsz, seq_len, -1)
         output = self.resid_dropout(self.o_proj(output)) # 将多个多头注意力的分数进行投影输入最后结果
         return output, past_kv
 
@@ -353,7 +355,7 @@ class MiniMindModel(nn.Module):
             past_kv_values = None
         past_kv_values = past_kv_values or [None] * len(self.layers)
         # 1、从kvcahce中获取当前token的绝对起始位置
-        start_pos = past_kv_values[0][0] if past_kv_values is not None else 0
+        start_pos = past_kv_values[0][0].shape[1] if past_kv_values[0] is not None else 0
         hidden_states = self.dropout(self.embed_tokens(input_ids))
 
         # 2、获取rope的θ频率(包括yard步骤)
@@ -406,7 +408,7 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
         self.model = MiniMindModel(self.config) # 定义模型网络
         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias = False) # 线形层
         if self.config.tie_word_embeddings:
-            self.model.embeds_tokens.weight = self.lm_model.weight
+            self.model.embed_tokens.weight = self.lm_head.weight
         self.post_init()
 
     def forward(self, input_ids, attention_mask = None, past_kv_values = None, use_cache = False,
@@ -503,7 +505,7 @@ class MiniMindForCausalLM(PreTrainedModel, GenerationMixin):
                 logits[origin_mask] = -float('inf')
 
             # 7、对最终的打分进行softmax
-            next_token = torch.multinomail(torch.softmax(logits, dim=-1), num_samples=1) if do_sample else torch.argmax(logits, dim=-1, keepdim=True) # [Batch_size, vocab_size]
+            next_token = torch.multinomial(torch.softmax(logits, dim=-1), num_samples=1) if do_sample else torch.argmax(logits, dim=-1, keepdim=True) # [Batch_size, vocab_size]
             # 8、是否为结束符
             if eos_token_id is not None:
                 next_token = torch.where(finished.unsqueeze(-1),next_token.new_full((next_token.shape[0], 1),

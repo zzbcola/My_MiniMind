@@ -3,7 +3,7 @@ sft的训练和pretrain训练的方法完全一致，只是使用的数据以及
 项目	                    train_pretrain.py	            train_full_sft.py
 数据集	                PretrainDataset	                SFTDataset
 默认数据	                pretrain_t2t_mini.jsonl	        sft_t2t_mini.jsonl
-初始权重	                none，从头训练	                pretrain，加载预训练权重
+初始权重	                none，从头训练	               pretrain，加载预训练权重
 学习率	                5e-4	                        1e-5
 序列长度	                340	                            768
 批大小 / 梯度累积	        32 / 8	                       16 / 1

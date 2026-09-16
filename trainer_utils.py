@@ -100,7 +100,7 @@ def lm_checkpoint(lm_config, weight='full_sft', model=None, optimizer=None,
 
         resume_tmp = resume_path + 'tmp'
         torch.save(resume_data, resume_tmp)
-        os.replace(resume_path, resume_tmp)
+        os.replace(resume_tmp, resume_path)
         del state_dict, resume_data
         empty_device_cache('mps')
     # 加载模式
