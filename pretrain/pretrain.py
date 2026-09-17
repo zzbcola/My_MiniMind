@@ -3,7 +3,7 @@
 '''
 import time
 import os
-
+from pathlib import Path
 from accelerate.data_loader import SkipBatchSampler
 from torch.utils.data import DataLoader, DistributedSampler
 from dataset.lm_dataset import PretrainDataset
@@ -15,6 +15,9 @@ from torch import nn, optim
 from contextlib import nullcontext
 from trainer_utils import get_lr, Logger, lm_checkpoint, setup_seed, init_model
 from model.model_minimind import MiniMindConfig, MiniMindModel
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+CHECKPOINT_DIR = BASE_DIR / 'checkpoints'
 
 def train_epoch(epoch, loader, iters, start_step = 0, wandb = None):
     '''
@@ -45,7 +48,7 @@ def train_epoch(epoch, loader, iters, start_step = 0, wandb = None):
             # 当累加到一定的步数的时候，对优化器进行一个真正的参数更新
         if step % args.accumulation_steps == 0:
             # scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_chip) # 梯度裁剪放置梯度爆炸
+            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip) # 梯度裁剪放置梯度爆炸
 
             # scaler.step(optimizer)
             # scaler.update()
@@ -72,7 +75,7 @@ def train_epoch(epoch, loader, iters, start_step = 0, wandb = None):
             raw_model = getattr(raw_model, '_orig_mod', raw_model)
             state_dict = raw_model.state_dict()
             torch.save({k: v.half().cpu() for k, v in state_dict.items()}, ckp)
-            lm_checkpoint(lm_config, weight=args.save_weight, model=model, optimizer=optimizer, scaler=scaler, epoch=epoch, step=step, wandb=wandb, save_dir='../checkpoints')
+            lm_checkpoint(lm_config, weight=args.save_weight, model=model, optimizer=optimizer, scaler=scaler, epoch=epoch, step=step, wandb=wandb, save_dir=CHECKPOINT_DIR)
             model.train()
             del state_dict
 
@@ -94,7 +97,7 @@ def train_epoch(epoch, loader, iters, start_step = 0, wandb = None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MiniMind Pretraining")
-    parser.add_argument("--save_dir", type=str, default="../train_result", help="模型保存目录")
+    parser.add_argument("--save_dir", type=str, default=f"{BASE_DIR}/train_result", help="模型保存目录")
     parser.add_argument('--save_weight', default='pretrain', type=str, help="保存权重的前缀名")
     parser.add_argument("--epochs", type=int, default=2, help="训练轮数")
     parser.add_argument("--batch_size", type=int, default=32, help="batch size")
@@ -110,7 +113,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_hidden_layers', default=8, type=int, help="隐藏层数量")
     parser.add_argument('--max_seq_len', default=340, type=int, help="训练的最大截断长度（中文1token≈1.5~1.7字符）")
     parser.add_argument('--use_moe', default=0, type=int, choices=[0, 1], help="是否使用MoE架构（0=否，1=是）")
-    parser.add_argument("--data_path", type=str, default="dataset/pretrain_t2t_mini.jsonl", help="预训练数据路径")
+    parser.add_argument("--data_path", type=str, default=f"{BASE_DIR}/dataset/pretrain_t2t_mini.jsonl", help="预训练数据路径")
     parser.add_argument('--from_weight', default='none', type=str, help="基于哪个权重训练，为none则从头开始")
     parser.add_argument('--from_resume', default=0, type=int, choices=[0, 1], help="是否自动检测&续训（0=否，1=是）")
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb")
@@ -130,7 +133,7 @@ if __name__ == "__main__":
     # 2. 配置目录、模型参数、检查ckp
     os.makedirs(args.save_dir, exist_ok=True)
     lm_config = MiniMindConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe))
-    ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir='../checkpoints') if args.from_resume==1 else None
+    ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir=CHECKPOINT_DIR) if args.from_resume==1 else None
 
     # 3. 设置混合精度
     device_type = "mps" if "mps" in args.device else "cpu"
@@ -148,7 +151,7 @@ if __name__ == "__main__":
         wandb.init(project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume)
 
     # 5. 定义模型、数据、优化器
-    model, tokenizer = init_model(lm_config=lm_config, from_weight=args.from_weight, device=args.device)
+    model, tokenizer = init_model(lm_config=lm_config, from_weight=args.from_weight, tokenizer_path=BASE_DIR / 'model', save_dir=args.save_dir, device=args.device)
     train_ds = PretrainDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None # 如果是分布式训练需要分布式采样训练数据
     # scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == 'float16'))
