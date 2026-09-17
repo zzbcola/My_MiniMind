@@ -52,6 +52,7 @@ class PretrainDataset(Dataset):
         super().__init__()
         self.tokenizer = tokenizer
         self.max_length = max_length
+        self.pad_token_id = tokenizer.pad_token_id
         self.samples = load_dataset('json', data_files=data_path, split='train')
 
     def __len__(self):
@@ -65,13 +66,22 @@ class PretrainDataset(Dataset):
         tokens = self.tokenizer(str(sample['text']), add_special_tokens=False, max_length=self.max_length - 2, truncation=True).input_ids
         # 在text前后部分加上“开始符号”和“结束符号”
         tokens = [self.tokenizer.bos_token_id] + tokens + [self.tokenizer.eos_token_id]
-        # 填充 pad_token_id 到固定长度，方便每一个batch的长度一致进行训练
-        input_ids = tokens + [self.tokenizer.pad_token_id] * (self.max_length - len(tokens))
-        input_ids = torch.tensor(input_ids, dtype=torch.long)
-        labels = input_ids.clone()
-        # 对于填充的部分进行忽视，防止模型进行无效预测
-        labels[input_ids == self.tokenizer.pad_token_id] = -100
-        return input_ids, labels
+        return tokens
+
+    def collate_fn(self, batch):
+        # 每个 batch 只填充到本批次最长样本，减少固定 max_length 带来的无效计算
+        batch_max_length = min(max(len(tokens) for tokens in batch), self.max_length)
+        input_ids_list = []
+        labels_list = []
+        for tokens in batch:
+            input_ids = tokens[:batch_max_length]
+            input_ids = input_ids + [self.tokenizer.eos_token_id] * (batch_max_length - len(input_ids))
+            labels = input_ids.copy()
+            if len(tokens) < batch_max_length:
+                labels[len(tokens):] = [-100] * (batch_max_length - len(tokens))
+            input_ids_list.append(input_ids)
+            labels_list.append(labels)
+        return torch.tensor(input_ids_list, dtype=torch.long), torch.tensor(labels_list, dtype=torch.long)
 
 class SFTDataset(Dataset):
     '''

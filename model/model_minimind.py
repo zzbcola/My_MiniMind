@@ -76,14 +76,14 @@ def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
         '''
         将向量逆时针旋转90度
         '''
-        return torch.cat((-x[...,x.shape[-1] // 2 :], x[:x.shape[-1] // 2]), dim = -1)
+        return torch.cat((-x[...,x.shape[-1] // 2 :], x[..., : x.shape[-1] // 2]), dim = -1)
     q_embed = ((q * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q) * sin.unsqueeze(unsqueeze_dim))).to(q.dtype)
     k_embed = ((k * cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k) * sin.unsqueeze(unsqueeze_dim))).to(k.dtype)
     return q_embed, k_embed
 
 def repeat_kv(x:torch.Tensor, n_rep:int) -> torch.Tensor:
     '''
-    将kv中多头注意力的头数复制n_rep份
+    将kv中多头注意力的头数复制n_rep份`   q
     '''
     batch_size, seq_len, num_key_value_heads, head_dim = x.shape
     if n_rep == 1 : return x
@@ -182,7 +182,7 @@ class Attention(nn.Module):
         xv = xv.view(bsz, seq_len, self.n_local_kv_heads, self.head_dim)
 
         # 3、只对q k做归一化，这样q . k点积的时候不容爆掉
-        xq, xk = self.q_norm(xq), self.q_norm(xk)
+        xq, xk = self.q_norm(xq), self.k_norm(xk)
 
         # 4、对q和k做位置编码
         cos, sin = position_embeddings
@@ -202,7 +202,9 @@ class Attention(nn.Module):
                       repeat_kv(xv, self.n_rep).transpose(1, 2))
 
         # 7、计算注意力
-        if self.flash and (seq_len > 1) and (not self.is_causal or past_key_value is None) and (attention_mask is None or torch.all(attention_mask == 1)):
+        has_padding = attention_mask is not None and not bool(torch.all(attention_mask == 1).item())
+        use_flash = self.flash and seq_len > 1 and past_key_value is None and not has_padding
+        if use_flash:
             # 封装好的attention计算
             output = F.scaled_dot_product_attention(xq, xk, xv,
                                                     dropout_p = self.dropout if self.training else 0.0,

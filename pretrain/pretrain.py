@@ -10,7 +10,7 @@ sys.path.insert(0, str(BASE_DIR))
 import time
 import os
 from accelerate.data_loader import SkipBatchSampler
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader, DistributedSampler, BatchSampler
 from dataset.lm_dataset import PretrainDataset
 import argparse
 import torch
@@ -142,8 +142,11 @@ if __name__ == "__main__":
     # 3. 设置混合精度
     device_type = "mps" if "mps" in args.device else "cpu"
     dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16
-        # mps训练下不启用autocast
-    autocast_ctx = nullcontext()
+    autocast_ctx = (
+        torch.autocast(device_type=device_type, dtype=dtype, enabled=device_type == "mps")
+        if device_type == "mps"
+        else nullcontext()
+    )
 
     # 4. 配wandb
     wandb = None
@@ -183,8 +186,14 @@ if __name__ == "__main__":
         setup_seed(42 + epoch)
         indices = torch.randperm(len(train_ds)).tolist()
         skip = start_step if (epoch == start_epoch and start_step > 0) else 0
-        batch_sampler = SkipBatchSampler(train_sampler or indices, args.batch_size, skip) # 将采样的数据合成一个个batch方便后续训练
-        loader = DataLoader(train_ds, batch_sampler = batch_sampler, num_workers=args.num_workers, pin_memory = False) # mps下不需要pinned memory
+        # 需要先用BatchSampler将数据分好batch之后再跳过采样
+        base_sample = train_sampler or indices
+        base_batch_sampler = BatchSampler(base_sample, batch_size=args.batch_size, drop_last=False) # 将采样的数据合成一个个batch方便后续训练
+        batch_sampler = SkipBatchSampler(
+            base_batch_sampler,
+            skip_batches=skip
+        )
+        loader = DataLoader(train_ds, batch_sampler=batch_sampler, collate_fn=train_ds.collate_fn, num_workers=args.num_workers, pin_memory=False)
         if skip > 0:
             Logger(f'Epoch [{epoch + 1}/{args.epochs}]: 跳过前{start_step}个step，从step {start_step + 1}开始')
             train_epoch(epoch, loader, len(loader) + skip, start_step, wandb)
