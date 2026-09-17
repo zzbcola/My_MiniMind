@@ -216,7 +216,7 @@ class Attention(nn.Module):
             # 对于句子的padding做掩码，对其句子长度统一的同时，将pad部分做attention后的0值处理
             if attention_mask is not None:
                 scores += (1.0 - attention_mask.unsqueeze(1).unsqueeze(2)) * -1e9
-            output = self.attn_dropout(F.softmax(scores.float()), dim = -1).type_as(xq) @ xv
+            output = self.attn_dropout(F.softmax(scores.float(), dim = -1)).type_as(xq) @ xv
 
         output = output.transpose(1,2).reshape(bsz, seq_len, -1)
         output = self.resid_dropout(self.o_proj(output)) # 将多个多头注意力的分数进行投影输入最后结果
@@ -322,12 +322,12 @@ class MiniMindBlock(nn.Module):
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps) # 归一化层化
         self.mlp = FeedForward(config) if not config.use_moe else MOEFeedForward(config)
 
-    def forward(self, hidden_states, position_embeddings, paste_kv_value = None,
+    def forward(self, hidden_states, position_embeddings, past_kv_value = None,
                 use_cache = False, attention_mask = None):
         residual = hidden_states
         hidden_states, present_key_value = self.self_attn(
             self.input_layernorm(hidden_states),
-            position_embeddings, paste_kv_value, use_cache, attention_mask
+            position_embeddings, past_kv_value, use_cache, attention_mask
         ) # 这里的hidden_states为注意力分数计算结果
         hidden_states += residual # 做残差链接
         # 再加上经过归一化+前馈网络的结果
@@ -371,11 +371,11 @@ class MiniMindModel(nn.Module):
 
         presents = []
         # 4、应用到实际的MiniMindModules中，进行完整的transformers计算(MiniMindBlock类)
-        for layer, past_kv_values in zip(self.layers, past_kv_values):
+        for layer, past_kv_value in zip(self.layers, past_kv_values):
             hidden_states, present = layer(
                 hidden_states,
                 position_embeddings,
-                past_kv_values = past_kv_values,
+                past_kv_value = past_kv_value,
                 use_cache = use_cache,
                 attention_mask = attention_mask
             )

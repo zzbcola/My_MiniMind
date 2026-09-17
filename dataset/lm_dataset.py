@@ -1,11 +1,8 @@
-from pint.pint_eval import tokenizer
 from torch.utils.data import Dataset
 import torch
 import json
-import os
 import random
-from datasets import load_dataset, Features, Sequence, Value
-from torchgen.native_function_generation import self_to_out_signature
+from datasets import load_dataset, Features, Value
 
 
 def pre_processing_chat(conversations, add_system_ratio=0.2):

@@ -44,12 +44,12 @@ def train_epoch(epoch, loader, iters, start_step = 0, wandb = None):
         # 梯度累加控制
             # 当累加到一定的步数的时候，对优化器进行一个真正的参数更新
         if step % args.accumulation_steps == 0:
-            scaler.unscale_(optimizer)
+            # scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_chip) # 梯度裁剪放置梯度爆炸
 
-            scaler.step(optimizer)
-            scaler.update()
-
+            # scaler.step(optimizer)
+            # scaler.update()
+            optimizer.step()
             optimizer.zero_grad(set_to_none=True) # 更新完参数后梯度重新设置为零。
 
         # 日志报告loss情况
@@ -78,15 +78,15 @@ def train_epoch(epoch, loader, iters, start_step = 0, wandb = None):
 
         del input_ids, labels, res, loss
 
-        # 尾部梯度更新
-        # 剩余数据不足够进行一次梯度更新的时候，将最后一组数据的结果作为最后的更新结果。
-        if last_step > start_step and last_step % args.accumulation_steps != 0:
-            # scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-            # scaler.step(optimizer)
-            # scaler.update()
-            optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
+    # 尾部梯度更新
+    # 剩余数据不足够进行一次梯度更新的时候，将最后一组数据的结果作为最后的更新结果。
+    if last_step > start_step and last_step % args.accumulation_steps != 0:
+        # scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+        # scaler.step(optimizer)
+        # scaler.update()
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
 
 
 
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_hidden_layers', default=8, type=int, help="隐藏层数量")
     parser.add_argument('--max_seq_len', default=340, type=int, help="训练的最大截断长度（中文1token≈1.5~1.7字符）")
     parser.add_argument('--use_moe', default=0, type=int, choices=[0, 1], help="是否使用MoE架构（0=否，1=是）")
-    parser.add_argument("--data_path", type=str, default="../dataset/pretrain_t2t_mini.jsonl", help="预训练数据路径")
+    parser.add_argument("--data_path", type=str, default="dataset/pretrain_t2t_mini.jsonl", help="预训练数据路径")
     parser.add_argument('--from_weight', default='none', type=str, help="基于哪个权重训练，为none则从头开始")
     parser.add_argument('--from_resume', default=0, type=int, choices=[0, 1], help="是否自动检测&续训（0=否，1=是）")
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb")
