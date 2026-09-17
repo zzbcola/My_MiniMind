@@ -1,11 +1,14 @@
 '''
 预训练步骤
 '''
+
 import sys
+from pathlib import Path
+BASE_DIR = Path(__file__).resolve().parent.parent
+CHECKPOINT_DIR = BASE_DIR / 'checkpoints'
 sys.path.insert(0, str(BASE_DIR))
 import time
 import os
-from pathlib import Path
 from accelerate.data_loader import SkipBatchSampler
 from torch.utils.data import DataLoader, DistributedSampler
 from dataset.lm_dataset import PretrainDataset
@@ -18,8 +21,7 @@ from contextlib import nullcontext
 from trainer_utils import get_lr, Logger, lm_checkpoint, setup_seed, init_model
 from model.model_minimind import MiniMindConfig, MiniMindModel
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-CHECKPOINT_DIR = BASE_DIR / 'checkpoints'
+
 
 def train_epoch(epoch, loader, iters, start_step = 0, wandb = None):
     '''
