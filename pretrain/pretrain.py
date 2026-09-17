@@ -1,6 +1,8 @@
 '''
 预训练步骤
 '''
+import sys
+sys.path.insert(0, str(BASE_DIR))
 import time
 import os
 from pathlib import Path
