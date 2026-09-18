@@ -4,6 +4,8 @@ import json
 import random
 from datasets import load_dataset, Features, Value
 
+from trainer_utils import Logger
+
 
 def pre_processing_chat(conversations, add_system_ratio=0.2):
     '''

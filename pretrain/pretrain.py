@@ -12,6 +12,7 @@ import os
 from accelerate.data_loader import SkipBatchSampler
 from torch.utils.data import DataLoader, DistributedSampler, BatchSampler
 from dataset.lm_dataset import PretrainDataset
+from dataset.packed_dataset import TokenCache, PackedPretrainDataset, PackedBatchSampler, LengthGroupedPretrainDataset, LengthGroupedBatchSampler
 import argparse
 import torch
 import torch.distributed as dist
@@ -123,6 +124,13 @@ if __name__ == "__main__":
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb")
     parser.add_argument("--wandb_project", type=str, default="MiniMind-Pretrain", help="wandb项目名")
     parser.add_argument("--use_compile", default=0, type=int, choices=[0, 1], help="是否使用torch.compile加速（0=否，1=是）")
+
+    # 加速训练配置
+    parser.add_argument("--packing", default=1, type=int, choices=[0, 1], help="是否启用文档打包（0=不打包，使用原数据集）")
+    parser.add_argument("--length_grouped", default=0, type=int, choices=[0, 1], help="是否启用长度分桶（packing=0 时生效）")
+    parser.add_argument("--chunk_batches", type=int, default=64, help="长度分桶时每组排序的 batch 数，越大越省 padding 但越打乱全局次序")
+    parser.add_argument("--rebuild_cache", default=0, type=int, choices=[0, 1], help="是否强制重建 token 缓存（改了 max_seq_len 或数据后需要）")
+
     args = parser.parse_args()
     if args.device == "mps" and not torch.backends.mps.is_available():
         raise RuntimeError(
@@ -159,7 +167,22 @@ if __name__ == "__main__":
 
     # 5. 定义模型、数据、优化器
     model, tokenizer = init_model(lm_config=lm_config, from_weight=args.from_weight, tokenizer_path=BASE_DIR / 'model', save_dir=args.save_dir, device=args.device)
-    train_ds = PretrainDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
+
+    # 对数据集每batch进行sequence padding
+    if args.packing == 1 or args.length_grouped == 1:
+        token_cache = TokenCache(args.data_path, tokenizer, max_length=args.max_seq_len,
+                                 rebuild=bool(args.rebuild_cache))
+        Logger(f'Token cache: {token_cache.num_docs} docs, {token_cache.num_tokens} tokens, '
+               f'mean {token_cache.num_tokens / max(token_cache.num_docs, 1):.1f} tokens/doc')
+        if args.packing == 1:
+            train_ds = PackedPretrainDataset(token_cache, seq_len=args.max_seq_len)
+            Logger(f'Packed mode: {len(train_ds)} packs/epoch, 0 padding')
+        elif args.length_grouped == 1:
+            train_ds = LengthGroupedPretrainDataset(token_cache, tokenizer, max_length=args.max_seq_len)
+            Logger(f'Length-grouped mode: {len(train_ds)} docs/epoch, dynamic padding')
+    else:
+        train_ds = PretrainDataset(args.data_path, tokenizer, max_length=args.max_seq_len)
+
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None # 如果是分布式训练需要分布式采样训练数据
     # scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == 'float16'))
     scaler = None # mps下不能使用scaler
@@ -186,14 +209,29 @@ if __name__ == "__main__":
         setup_seed(42 + epoch)
         indices = torch.randperm(len(train_ds)).tolist()
         skip = start_step if (epoch == start_epoch and start_step > 0) else 0
-        # 需要先用BatchSampler将数据分好batch之后再跳过采样
-        base_sample = train_sampler or indices
-        base_batch_sampler = BatchSampler(base_sample, batch_size=args.batch_size, drop_last=False) # 将采样的数据合成一个个batch方便后续训练
-        batch_sampler = SkipBatchSampler(
-            base_batch_sampler,
-            skip_batches=skip
-        )
-        loader = DataLoader(train_ds, batch_sampler=batch_sampler, collate_fn=train_ds.collate_fn, num_workers=args.num_workers, pin_memory=False)
+
+        if args.packing == 1:
+            train_ds.set_epoch(epoch)
+            base_batch_sampler = PackedBatchSampler(len(train_ds), args.batch_size, seed=42 + epoch)
+            loader = DataLoader(train_ds, batch_sampler=SkipBatchSampler(base_batch_sampler, skip),
+                                num_workers=args.num_workers, pin_memory=False)
+        elif args.length_grouped == 1:
+            base_batch_sampler = LengthGroupedBatchSampler(
+                token_cache.doc_lengths, args.batch_size, seed=42 + epoch,
+                chunk_batches=args.chunk_batches)
+            loader = DataLoader(train_ds, batch_sampler=SkipBatchSampler(base_batch_sampler, skip),
+                                collate_fn=train_ds.collate_fn,
+                                num_workers=args.num_workers, pin_memory=False)
+        else:
+            indices = torch.randperm(len(train_ds)).tolist()
+            base_sample = train_sampler or indices
+            base_batch_sampler = SkipBatchSampler(
+                BatchSampler(base_sample, batch_size=args.batch_size, drop_last=False),
+                skip_batches=skip)
+            loader = DataLoader(train_ds, batch_sampler=base_batch_sampler,
+                                collate_fn=train_ds.collate_fn,
+                                num_workers=args.num_workers, pin_memory=False)
+
         if skip > 0:
             Logger(f'Epoch [{epoch + 1}/{args.epochs}]: 跳过前{start_step}个step，从step {start_step + 1}开始')
             train_epoch(epoch, loader, len(loader) + skip, start_step, wandb)
