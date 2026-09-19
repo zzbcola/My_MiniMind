@@ -287,5 +287,6 @@ class DPODataset(Dataset):
             'mask_rejected': mask_rejected
         }
 
-
+# class RLAIFDataset(Dataset):
+#     def __init__(self, json_path, tokenizer, max_length=1024, thinking_ratio=0.5):
 

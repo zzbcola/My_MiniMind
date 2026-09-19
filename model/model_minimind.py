@@ -196,20 +196,23 @@ class Attention(nn.Module):
         past_kv = (xk, xv) if use_cache else None
 
         # 6、将xq, xk, xv的1 2维度进行调换-> [B, Head_num, Seq_len, Head_dim]
-        # 再将k v中的注意力头数量复制n_rep份，与xq的头数量对齐，保证顺利完成点积
         xq, xk, xv = (xq.transpose(1, 2),
-                      repeat_kv(xk, self.n_rep).transpose(1, 2),
-                      repeat_kv(xv, self.n_rep).transpose(1, 2))
+                      xk.transpose(1, 2),
+                      xv.transpose(1, 2))
 
         # 7、计算注意力
         has_padding = attention_mask is not None and not bool(torch.all(attention_mask == 1).item())
         use_flash = self.flash and seq_len > 1 and past_key_value is None and not has_padding
         if use_flash:
-            # 封装好的attention计算
+            # 封装好的attention计算，2.14的pytorch支持
             output = F.scaled_dot_product_attention(xq, xk, xv,
                                                     dropout_p = self.dropout if self.training else 0.0,
-                                                    is_causal = self.is_causal)
+                                                    is_causal = self.is_causal, enable_gqa=self.n_rep > 1)
         else:
+            # 再将k v中的注意力头数量复制n_rep份，与xq的头数量对齐，保证顺利完成点积
+            xk, xv = (repeat_kv(xk, self.n_rep),
+                      repeat_kv(xv, self.n_rep))
+
             scores = (xq @ xk.transpose(-1, -2) / math.sqrt(self.head_dim))
             # 不能偷看未来，将最后seq_len往后都设置为-inf，这样softmax之后均为0
             if self.is_causal:
