@@ -6,3 +6,5 @@ model/*.json
 *.pyc
 *.pth
 .idea/
+swanlog/
+train_result/

@@ -9,7 +9,7 @@ from trainer_utils import Logger
 
 def pre_processing_chat(conversations, add_system_ratio=0.2):
     '''
-    在预训练阶段注入的system prompt
+    在训练阶段注入的system prompt
     :param conversations:输入的对话
     :param add_system_ratio:
     :return: 注入system prompt后的完整的对话
@@ -287,6 +287,39 @@ class DPODataset(Dataset):
             'mask_rejected': mask_rejected
         }
 
-# class RLAIFDataset(Dataset):
-#     def __init__(self, json_path, tokenizer, max_length=1024, thinking_ratio=0.5):
+class RLAIFDataset(Dataset):
+    def __init__(self, json_path, tokenizer, max_length=1024, thinking_ratio=0.5):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.thinking_radio = thinking_ratio # 概率开启thinking
+        self.bos_id = tokenizer(f'{tokenizer.bos_token}assistant\n', add_special_tokens=False).input_ids
+        self.eos_id = tokenizer(f'{tokenizer.eos_token}\n', add_special_tokens=False).input_ids
+        self.samples = load_dataset('json', data_files=file_path, split='train')
+
+    def __len__(self):
+        # 返回数据集的长度
+        return len(self.samples)
+
+    def create_chat_prompt(self, conversations):
+        conversations = pre_processing_chat(conversations)
+        use_thinking = random.random() > self.thinking_radio
+
+        # 转化为模板
+        return self.tokenizer.apply_chat_template(
+            conversations[:-1],
+            tokenize=False,
+            open_thinking = use_thinking,
+            add_generation_prompt=True
+        )
+
+    def __getitem__(self, index):
+        sample = self.samples[index]
+        prompt = self.tokenizer.create_chat_prompt(sample['conversations'])
+
+        # 由于rlaif数据集是多轮对话后，最后一轮的回答是空白的形式，因此，只需要将所有上下文都作为输入当作prompt，直接生成的答案即为对于空白处的回答。
+        return {
+            'prompt': prompt,
+            'answer': ""
+        }
 

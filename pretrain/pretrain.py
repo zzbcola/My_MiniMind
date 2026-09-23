@@ -223,7 +223,6 @@ if __name__ == "__main__":
                                 collate_fn=train_ds.collate_fn,
                                 num_workers=args.num_workers, pin_memory=False)
         else:
-            indices = torch.randperm(len(train_ds)).tolist()
             base_sample = train_sampler or indices
             base_batch_sampler = SkipBatchSampler(
                 BatchSampler(base_sample, batch_size=args.batch_size, drop_last=False),

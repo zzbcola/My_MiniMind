@@ -132,3 +132,28 @@ def init_model(lm_config, from_weight='pretrain', tokenizer_path='./model',
     # 训练参数量
     Logger(f'Trainable Params: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f}M')
     return model.to(device), tokenizer
+
+class LMForRewardModel:
+    '''
+    调用打分模型并且根据上下文和回答返回打分
+    '''
+    def __init__(self, model_path, device='mps', dtype=torch.float16):
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        self.model = AutoModel.from_pretrained(model_path, torch_dtype=dtype, trust_remote_code=True)
+        self.model = self.model.to(device).eval()
+        self.device = device
+
+        @torch.no_grad()
+        def get_score(self, messages, response):
+            # 获取数据集的完整回答上下文，以及最后一个问题
+            history_text = "\n".join([f"{m['role']}: {m['content']}" for m in message[:-1]])
+            last_query = message[-1]['content'] if message else ""
+            message_context = f"{history_text}\n以上是历史对话。我的新问题是:\n{last_query}" if history_text else last_query
+            # 将上下文和新的回答组织成一段问答信息
+            eval_message = [
+                {"role": "user", "content": message_context},
+                {"role": "assistant", "content": response}
+            ]
+            # 给评价模型进行打分
+            score = self.model.get_score(self.tokenizer, eval_message)
+            return max(min(score, 3.0), -3.0)
