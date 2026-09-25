@@ -323,3 +323,39 @@ class RLAIFDataset(Dataset):
             'answer': ""
         }
 
+class AgentRLDataset(Dataset):
+    def __init__(self, jsonl_path, tokenizer, max_length=1024):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.samples = []
+        with open(jsonl_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                self.samples.append(json.loads(line.strip()))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def parse_conversations(self, conversations):
+        '''
+        获取每个对话中,assistant可以调用的tools
+        例子如下：
+        "tools": "[{\"type\": \"function\", \"function\": {\"name\": \"calculate_math\", \"description\": \"计算数学表达式的结果，支持加减乘除、幂运算\", \"parameters\": {\"type\": \"object\", \"properties\": {\"expression\": {\"type\": \"string\", \"description\": \"数学表达式，如123+456、2**10\"}}, \"required\": [\"expression\"]}}}, {\"type\": \"function\", \"function\": {\"name\": \"translate_text\", \"description\": \"将文本翻译成目标语言\", \"parameters\": {\"type\": \"object\", \"properties\": {\"text\": {\"type\": \"string\", \"description\": \"要翻译的文本\"}, \"target_language\": {\"type\": \"string\", \"description\": \"目标语言，如english、chinese、japanese\"}}, \"required\": [\"text\", \"target_language\"]}}}]"}
+        '''
+        messages = []
+        tools = None
+        for message in conversations:
+            message = dict(message)
+            if message.get("role") == "system" and message.get('tools'):
+                tools = json.loads(message["tools"]) if isinstance(message["tools"], str) else message['tools']
+            messages.append(tools)
+        return messages[:-1], tools
+
+    def __getitem__(self, index):
+        '''
+        agentic rl的完整数据形式又messages, tools和gt组成
+        messages为完整的对话内容，包含tools， content和gt
+        '''
+        sample = self.samples[index]
+        messages, tools = self.parse_conversations(sample["conversations"])
+        return {'messages': messages, 'tools': tools, 'gt': sample['gt']}

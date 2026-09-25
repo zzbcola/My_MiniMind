@@ -269,7 +269,7 @@ if __name__ == "__main__":
     parser.add_argument("--reward_model_path", type=str, default=f"{BASE_DIR}/internlm2-1_8b-reward", help="Reward模型路径")
     parser.add_argument('--from_resume', default=0, type=int, choices=[0, 1], help="是否自动检测&续训（0=否，1=是）")
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb")
-    parser.add_argument("--wandb_project", type=str, default="MiniMind-Pretrain", help="wandb项目名")
+    parser.add_argument("--wandb_project", type=str, default="MiniMind-GRPO", help="wandb项目名")
     parser.add_argument("--use_compile", default=0, type=int, choices=[0, 1], help="是否使用torch.compile加速（0=否，1=是）")
     parser.add_argument("--debug_mode", action="store_true", help="是否打印训练调试采样")
     parser.add_argument("--debug_interval", type=int, default=20, help="debug模式下每隔多少step打印一次采样")
@@ -313,7 +313,7 @@ if __name__ == "__main__":
         wandb_run_name = f"MiniMind-GRPO-Epoch-{args.epochs}-BatchSize-{args.batch_size}-LearningRate-{args.learning_rate}"
         wandb.init(project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume)
 
-    # 5. 定义模型、数据、优化器
+    # 5. 定义需要训练的模型
     base_model = args.from_weight
     model, tokenizer = init_model(lm_config=lm_config, from_weight=args.from_weight,
                                   tokenizer_path=BASE_DIR / 'model', save_dir=args.save_dir,
